@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Misión a Marte: Golf Intergaláctico</title>
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Bangers&display=swap');
+    body {
+        margin: 0;
+        background: #050508;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        overflow: hidden;
+        font-family: 'Orbitron', sans-serif;
+        color: white;
+    }
+    #gameWrapper {
+        position: relative;
+        box-shadow: 0 0 100px rgba(0,0,0,1), 0 0 40px rgba(0, 229, 255, 0.2);
+        border: 4px solid #333;
+        border-radius: 15px;
+        overflow: hidden;
+        background: #000;
+    }
+    canvas { display: block; cursor: crosshair; }
+    #ui {
+        position: absolute;
+        top: 20px; left: 20px;
+        pointer-events: none;
+        z-index: 10;
+    }
+    #levelName {
+        font-family: 'Bangers', cursive;
+        font-size: 34px;
+        letter-spacing: 2px;
+        color: #4caf50;
+        text-shadow: 2px 2px 0px #000;
+        margin-bottom: 5px;
+    }
+    #stats {
+        font-size: 16px;
+        font-weight: 700;
+        color: #fff;
+        background: rgba(0,0,0,0.7);
+        padding: 6px 15px;
+        border-radius: 20px;
+        display: inline-block;
+        border: 1px solid rgba(255,255,255,0.2);
+    }
+    #overlay {
+        position: absolute;
+        top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0,0,0,0.85);
+        display: none;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 100;
+        text-align: center;
+        backdrop-filter: blur(5px);
+    }
+    #overlay h2 {
+        font-family: 'Bangers', cursive;
+        font-size: 70px;
+        margin: 0;
+        color: #00e5ff;
+        text-shadow: 4px 4px 0px #006064;
+    }
+    #overlay p { font-size: 24px; margin: 15px 0 30px; color: #fff; max-width: 600px; line-height: 1.4; }
+    #overlay button {
+        background: linear-gradient(135deg, #00e5ff, #00838f);
+        border: none;
+        padding: 15px 40px;
+        font-family: 'Bangers', cursive;
+        font-size: 28px;
+        color: white;
+        cursor: pointer;
+        border-radius: 50px;
+        box-shadow: 0 6px 0 #004d40;
+        transition: 0.1s;
+    }
+    #overlay button:active { transform: translateY(4px); box-shadow: 0 2px 0 #004d40; }
+</style>
+</head>
+<body>
+
+<div id="gameWrapper">
+    <canvas id="gameCanvas" width="1000" height="650"></canvas>
+    <div id="ui">
+        <div id="levelName">Misión: Marte</div>
+        <div id="stats">Preparando lanzamiento...</div>
+    </div>
+    <div id="overlay">
+        <h2 id="ovTitle">¡NIVEL COMPLETADO!</h2>
+        <p id="ovText">Texto descriptivo aquí.</p>
+        <button id="ovBtn">Siguiente</button>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const uiLevel = document.getElementById("levelName");
+const uiStats = document.getElementById("stats");
+const overlay = document.getElementById("overlay");
+const ovTitle = document.getElementById("ovTitle");
+const ovText = document.getElementById("ovText");
+const ovBtn = document.getElementById("ovBtn");
+
+let currentLevel = 0;
+let strokes = 0;
+let totalStrokes = 0;
+let ball = { x: 0, y: 0, vx: 0, vy: 0, r: 8, lastX: 0, lastY: 0, shake: 0 };
+let hole = { x: 0, y: 0, r: 16 };
+let aiming = false;
+let mouse = { x: 0, y: 0 };
+let particles = [];
+let ambientParticles = [];
+let frame = 0;
+let gameState = "playing";
+
+const THEMES = {
+    grass: {
+        bg: "#0a1a0a", floor: "#2e7d32", grid: "rgba(0,0,0,0.1)", wall: "#1b5e20",
+        water: "#0288d1", sand: "#cddc39", particle: "#81c784", ambient: "#fff",
+        name: "VALLE TERRESTRE"
+    },
+    desert: {
+        bg: "#1a1305", floor: "#ffb74d", grid: "rgba(0,0,0,0.05)", wall: "#795548",
+        water: "#00bcd4", sand: "#ffe082", particle: "#ffcc80", ambient: "#ffecb3",
+        name: "DESIERTO OLVIDADO"
+    },
+    volcano: {
+        bg: "#1a0505", floor: "#3e2723", grid: "rgba(255,0,0,0.05)", wall: "#212121",
+        water: "#ff3d00", sand: "#5d4037", particle: "#ff5722", ambient: "#ff9800",
+        name: "NÚCLEO VOLCÁNICO"
+    },
+    space: {
+        bg: "#050010", floor: "#1a237e", grid: "rgba(255,255,255,0.05)", wall: "#311b92",
+        water: "#00e5ff", sand: "#4a148c", particle: "#e1bee7", ambient: "#e1bee7",
+        name: "VACÍO ESTELAR"
+    }
+};
+
+const LEVELS = [
+    // --- CÉSPED Y AGUA (1-3) ---
+    {
+        name: "Inicio del Viaje", theme: "grass", ballStart: {x: 100, y: 325}, holePos: {x: 850, y: 325}, par: 3,
+        walls: [{x: 450, y: 150, w: 40, h: 350}], sand: [{x: 700, y: 325, r: 80}], water: [], bridges: [],
+        movingWalls: [], spinners: [], decor: [{type:'tree', x:200, y:100}, {type:'tree', x:800, y:550}],
+        desc: "¡Bienvenido cadete! Supera los campos de entrenamiento para iniciar tu viaje a Marte."
+    },
+    {
+        name: "Cruce de Ríos", theme: "grass", ballStart: {x: 80, y: 325}, holePos: {x: 900, y: 325}, par: 4,
+        walls: [], sand: [], water: [{x: 400, y: 0, w: 200, h: 650}], bridges: [{x: 400, y: 275, w: 200, h: 100}],
+        movingWalls: [{x: 700, y: 100, w: 30, h: 150, range: 300, axis: 'y', speed: 0.04}], spinners: [],
+        decor: [{type:'tree', x:300, y:100}, {type:'tree', x:300, y:550}],
+        desc: "El agua es peligrosa. Usa el puente de madera para cruzar con seguridad."
+    },
+    {
+        name: "Trampa Hidráulica", theme: "grass", ballStart: {x: 100, y: 100}, holePos: {x: 900, y: 550}, par: 5,
+        walls: [{x: 0, y: 320, w: 600, h: 20}, {x: 400, y: 450, w: 600, h: 20}], sand: [],
+        water: [{x: 200, y: 150, w: 100, h: 100}], bridges: [], movingWalls: [],
+        spinners: [{x: 500, y: 325, size: 100, speed: 0.03}], decor: [{type:'tree', x:100, y:550}],
+        desc: "Último nivel terrestre. Prepárate para el calor sofocante del desierto."
+    },
+    // --- DESIERTO (4-6) ---
+    {
+        name: "Dunas Ardientes", theme: "desert", ballStart: {x: 100, y: 325}, holePos: {x: 900, y: 325}, par: 4,
+        walls: [{x: 300, y: 0, w: 30, h: 250}, {x: 300, y: 400, w: 30, h: 250}],
+        sand: [{x: 500, y: 325, r: 150}], water: [], bridges: [], movingWalls: [], spinners: [],
+        decor: [{type:'cactus', x:150, y:150}, {type:'cactus', x:850, y:500}],
+        desc: "La arena del desierto frenará tu bola drásticamente. ¡Golpea con fuerza!"
+    },
+    {
+        name: "Espejismo Móvil", theme: "desert", ballStart: {x: 80, y: 80}, holePos: {x: 920, y: 570}, par: 5,
+        walls: [], sand: [], water: [{x: 300, y: 200, w: 400, h: 250}], bridges: [{x: 450, y: 200, w: 100, h: 250}],
+        movingWalls: [{x: 150, y: 250, w: 150, h: 30, range: 400, axis: 'x', speed: 0.06}],
+        spinners: [], decor: [{type:'cactus', x:800, y:100}],
+        desc: "Ese oasis no es un espejismo. Si caes en el agua, volverás al inicio del golpe."
+    },
+    {
+        name: "Tormenta de Arena", theme: "desert", ballStart: {x: 500, y: 80}, holePos: {x: 500, y: 570}, par: 6,
+        walls: [{x: 200, y: 300, w: 600, h: 30}], sand: [{x: 200, y: 315, r: 100}, {x: 800, y: 315, r: 100}],
+        water: [], bridges: [], movingWalls: [],
+        spinners: [{x: 250, y: 315, size: 80, speed: 0.08}, {x: 750, y: 315, size: 80, speed: -0.08}],
+        decor: [{type:'cactus', x:100, y:325}, {type:'cactus', x:900, y:325}],
+        desc: "Las aspas giran rápido aquí. Esquiva los obstáculos para llegar al volcán."
+    },
+    // --- VOLCÁN (7-9) ---
+    {
+        name: "Ríos de Magma", theme: "volcano", ballStart: {x: 100, y: 325}, holePos: {x: 900, y: 325}, par: 5,
+        walls: [], sand: [], water: [{x: 300, y: 0, w: 100, h: 650}, {x: 600, y: 0, w: 100, h: 650}],
+        bridges: [{x: 300, y: 100, w: 100, h: 80}, {x: 600, y: 470, w: 100, h: 80}],
+        movingWalls: [], spinners: [], decor: [{type:'rock', x:150, y:150}, {type:'crystal', x:850, y:100}],
+        desc: "¡Cuidado! El 'agua' aquí es lava ardiente. No toques el rojo."
+    },
+    {
+        name: "Cámara de Presión", theme: "volcano", ballStart: {x: 100, y: 550}, holePos: {x: 900, y: 100}, par: 6,
+        walls: [{x: 450, y: 0, w: 100, h: 500}], sand: [{x: 250, y: 250, r: 60}], water: [], bridges: [],
+        movingWalls: [{x: 550, y: 300, w: 300, h: 30, range: 300, axis: 'y', speed: 0.07}],
+        spinners: [{x: 200, y: 150, size: 60, speed: 0.1}], decor: [{type:'rock', x:800, y:500}],
+        desc: "La presión aumenta. Debes ser preciso para avanzar hacia la plataforma de lanzamiento."
+    },
+    {
+        name: "Lanzamiento Espacial", theme: "volcano", ballStart: {x: 100, y: 325}, holePos: {x: 880, y: 325}, par: 6,
+        walls: [{x: 750, y: 0, w: 20, h: 250}, {x: 750, y: 400, w: 20, h: 250}], sand: [],
+        water: [{x: 0, y: 0, w: 1000, h: 50}, {x: 0, y: 600, w: 1000, h: 50}], bridges: [],
+        movingWalls: [{x: 400, y: 100, w: 40, h: 450, range: 300, axis: 'x', speed: 0.05}],
+        spinners: [], decor: [{type:'rocket', x: 880, y: 325}],
+        desc: "¡Mira! El hoyo está dentro de un cohete. ¡Emboca para salir de la atmósfera!",
+        isRocketLevel: true
+    },
+    // --- ESPACIO (10-12) ---
+    {
+        name: "Gravedad Cero", theme: "space", ballStart: {x: 100, y: 325}, holePos: {x: 900, y: 325}, par: 6,
+        walls: [], sand: [], water: [{x: 400, y: 200, w: 200, h: 250}], bridges: [],
+        movingWalls: [{x: 250, y: 100, w: 20, h: 150, range: 400, axis: 'y', speed: 0.08},
+                     {x: 730, y: 100, w: 20, h: 150, range: 400, axis: 'y', speed: 0.08}],
+        spinners: [{x: 500, y: 325, size: 150, speed: 0.02}], decor: [{type:'star', x:200, y:100}, {type:'star', x:800, y:500}],
+        desc: "Estamos en el espacio. Los obstáculos se mueven de forma extraña aquí."
+    },
+    {
+        name: "Cinturón de Asteroides", theme: "space", ballStart: {x: 100, y: 100}, holePos: {x: 900, y: 550}, par: 7,
+        walls: [{x: 300, y: 300, w: 400, h: 40}], sand: [], water: [], bridges: [],
+        movingWalls: [], spinners: [{x: 200, y: 450, size: 90, speed: 0.1}, {x: 800, y: 200, size: 90, speed: -0.1}],
+        decor: [{type:'star', x:500, y:100}, {type:'star', x:500, y:550}],
+        desc: "Esquiva los restos espaciales. Marte está cada vez más cerca."
+    },
+    {
+        name: "Llegada a Marte", theme: "space", ballStart: {x: 100, y: 325}, holePos: {x: 850, y: 325}, par: 8,
+        walls: [{x: 700, y: 100, w: 30, h: 450}], sand: [], water: [{x: 700, y: 300, w: 30, h: 50}], bridges: [],
+        movingWalls: [{x: 400, y: 50, w: 30, h: 200, range: 350, axis: 'y', speed: 0.09}],
+        spinners: [{x: 850, y: 325, size: 120, speed: 0.05}], decor: [{type:'mars', x: 850, y: 325}],
+        desc: "¡EL OBJETIVO FINAL! Marte es el hoyo. ¡Haz historia, astronauta!",
+        isMarsLevel: true
+    }
+];
+
+function initLevel(idx) {
+    const level = LEVELS[idx];
+    ball.x = level.ballStart.x;
+    ball.y = level.ballStart.y;
+    ball.vx = ball.vy = 0;
+    ball.lastX = ball.x;
+    ball.lastY = ball.y;
+    hole.x = level.holePos.x;
+    hole.y = level.holePos.y;
+    strokes = 0;
+    gameState = "playing";
+    overlay.style.display = "none";
+    uiLevel.innerText = `${THEMES[level.theme].name}: ${level.name}`;
+    uiLevel.style.color = THEMES[level.theme].particle;
+    uiStats.innerText = `Golpes: 0 | Par: ${level.par}`;
+    
+    ambientParticles = [];
+    const count = level.theme === 'space' ? 100 : 40;
+    for(let i=0; i<count; i++) {
+        ambientParticles.push({
+            x: Math.random() * canvas.width, y: Math.random() * canvas.height,
+            vx: (Math.random()-0.5)*0.5, vy: (Math.random()-0.5)*0.5,
+            size: Math.random()*2 + 1, life: Math.random()
+        });
+    }
+}
+
+function createParticles(x, y, color, count, speed = 5) {
+    for (let i = 0; i < count; i++) {
+        particles.push({
+            x: x, y: y,
+            vx: (Math.random() - 0.5) * speed, vy: (Math.random() - 0.5) * speed,
+            life: 1, color: color, size: Math.random() * 4 + 1
+        });
+    }
+}
+
+function drawDecoration(d) {
+    ctx.save();
+    if (d.type === 'tree') {
+        ctx.fillStyle = '#795548'; ctx.fillRect(d.x-4, d.y, 8, 15);
+        ctx.fillStyle = '#2e7d32'; ctx.beginPath(); ctx.arc(d.x, d.y, 12, 0, Math.PI*2); ctx.fill();
+    } else if (d.type === 'cactus') {
+        ctx.fillStyle = '#2e7d32'; ctx.fillRect(d.x-5, d.y-20, 10, 30);
+        ctx.fillRect(d.x-15, d.y-10, 20, 5);
+    } else if (d.type === 'rock') {
+        ctx.fillStyle = '#555'; ctx.beginPath(); ctx.moveTo(d.x-15, d.y+10); ctx.lineTo(d.x, d.y-20); ctx.lineTo(d.x+15, d.y+10); ctx.fill();
+    } else if (d.type === 'crystal') {
+        ctx.fillStyle = 'rgba(0, 229, 255, 0.6)'; ctx.shadowBlur = 10; ctx.shadowColor = '#00e5ff';
+        ctx.beginPath(); ctx.moveTo(d.x, d.y-20); ctx.lineTo(d.x+10, d.y); ctx.lineTo(d.x, d.y+20); ctx.lineTo(d.x-10, d.y); ctx.closePath(); ctx.fill();
+    } else if (d.type === 'star') {
+        ctx.fillStyle = '#fff'; ctx.shadowBlur = 15; ctx.shadowColor = '#fff';
+        ctx.beginPath(); ctx.arc(d.x, d.y, 2, 0, Math.PI*2); ctx.fill();
+    } else if (d.type === 'rocket') {
+        // Dibujar cohete sobre el hoyo
+        ctx.translate(d.x, d.y);
+        ctx.fillStyle = '#ccc'; ctx.beginPath(); ctx.moveTo(0, -50); ctx.lineTo(20, 0); ctx.lineTo(-20, 0); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#999'; ctx.fillRect(-15, 0, 30, 40);
+        ctx.fillStyle = '#f44336'; ctx.beginPath(); ctx.moveTo(-15, 40); ctx.lineTo(-25, 60); ctx.lineTo(-15, 60); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(15, 40); ctx.lineTo(25, 60); ctx.lineTo(15, 60); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#03a9f4'; ctx.beginPath(); ctx.arc(0, 15, 7, 0, Math.PI*2); ctx.fill();
+    } else if (d.type === 'mars') {
+        // Dibujar Marte como el hoyo
+        const grad = ctx.createRadialGradient(d.x-10, d.y-10, 5, d.x, d.y, 50);
+        grad.addColorStop(0, '#ff7043'); grad.addColorStop(1, '#bf360c');
+        ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(d.x, d.y, 50, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = '#e64a19'; ctx.lineWidth = 2; ctx.stroke();
+    }
+    ctx.restore();
+}
+
+function update() {
+    if (gameState !== "playing") return;
+    frame++;
+    const level = LEVELS[currentLevel];
+    const theme = THEMES[level.theme];
+
+    if (ball.shake > 0) ball.shake *= 0.9;
+
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+
+    let friction = 0.985;
+    level.sand.forEach(s => {
+        if (Math.hypot(ball.x - s.x, ball.y - s.y) < s.r) friction = 0.92;
+    });
+
+    ball.vx *= friction;
+    ball.vy *= friction;
+    if (Math.abs(ball.vx) < 0.1) ball.vx = 0;
+    if (Math.abs(ball.vy) < 0.1) ball.vy = 0;
+
+    // Bordes
+    if (ball.x < ball.r || ball.x > canvas.width - ball.r) {
+        ball.vx *= -0.7; ball.x = ball.x < ball.r ? ball.r : canvas.width - ball.r;
+        ball.shake = 5;
+    }
+    if (ball.y < ball.r || ball.y > canvas.height - ball.r) {
+        ball.vy *= -0.7; ball.y = ball.y < ball.r ? ball.r : canvas.height - ball.r;
+        ball.shake = 5;
+    }
+
+    // Colisión Muros
+    const allWalls = [...level.walls];
+    level.movingWalls.forEach(mw => {
+        let currentPos = Math.sin(frame * mw.speed) * mw.range/2;
+        let wx = mw.axis === 'x' ? mw.x + currentPos : mw.x;
+        let wy = mw.axis === 'y' ? mw.y + currentPos : mw.y;
+        allWalls.push({ x: wx, y: wy, w: mw.w, h: mw.h });
+    });
+
+    allWalls.forEach(w => {
+        if (ball.x + ball.r > w.x && ball.x - ball.r < w.x + w.w && ball.y + ball.r > w.y && ball.y - ball.r < w.y + w.h) {
+            let ox = Math.min(ball.x + ball.r - w.x, w.x + w.w - (ball.x - ball.r));
+            let oy = Math.min(ball.y + ball.r - w.y, w.y + w.h - (ball.y - ball.r));
+            if (ox < oy) { ball.vx *= -0.8; ball.x += ball.vx > 0 ? ox : -ox; }
+            else { ball.vy *= -0.8; ball.y += ball.vy > 0 ? oy : -oy; }
+            ball.shake = 8;
+        }
+    });
+
+    // Spinners
+    level.spinners.forEach(s => {
+        let angle = frame * s.speed;
+        for(let i=0; i<4; i++) {
+            let a = angle + (i * Math.PI/2);
+            let tipX = s.x + Math.cos(a) * s.size;
+            let tipY = s.y + Math.sin(a) * s.size;
+            let dist = distToSegment({x: ball.x, y: ball.y}, {x: s.x, y: s.y}, {x: tipX, y: tipY});
+            if (dist < ball.r + 5) {
+                ball.vx = Math.cos(a + Math.PI/2) * 12;
+                ball.vy = Math.sin(a + Math.PI/2) * 12;
+                ball.shake = 10;
+            }
+        }
+    });
+
+    // Agua/Lava
+    level.water.forEach(w => {
+        let onBridge = false;
+        level.bridges.forEach(b => {
+            if (ball.x > b.x && ball.x < b.x + b.w && ball.y > b.y && ball.y < b.y + b.h) onBridge = true;
+        });
+        if (!onBridge && ball.x > w.x && ball.x < w.x + w.w && ball.y > w.y && ball.y < w.y + w.h) {
+            createParticles(ball.x, ball.y, theme.water, 20, 8);
+            ball.vx = 0; ball.vy = 0; ball.x = ball.lastX; ball.y = ball.lastY;
+            ball.shake = 12;
+        }
+    });
+
+    // Hoyo detect
+    let holeLimit = level.isMarsLevel ? 40 : hole.r;
+    if (Math.hypot(ball.x - hole.x, ball.y - hole.y) < holeLimit) {
+        if (Math.hypot(ball.vx, ball.vy) < 7) {
+            gameState = "transition";
+            createParticles(hole.x, hole.y, "#00e5ff", 80, 15);
+            setTimeout(showVictory, 800);
+        }
+    }
+
+    // Partículas
+    particles.forEach((p, i) => {
+        p.x += p.vx; p.y += p.vy; p.life -= 0.02;
+        if (p.life <= 0) particles.splice(i, 1);
+    });
+    ambientParticles.forEach(p => {
+        p.x += p.vx; p.y += p.vy;
+        if(p.x < 0) p.x = canvas.width; if(p.x > canvas.width) p.x = 0;
+        if(p.y < 0) p.y = canvas.height; if(p.y > canvas.height) p.y = 0;
+    });
+}
+
+function distToSegment(p, v, w) {
+    let l2 = Math.hypot(v.x - w.x, v.y - w.y)**2;
+    if (l2 == 0) return Math.hypot(p.x - v.x, p.y - v.y);
+    let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
+}
+
+function showVictory() {
+    totalStrokes += strokes;
+    const level = LEVELS[currentLevel];
+    ovTitle.innerText = strokes === 1 ? "¡HOLE IN ONE!" : "¡NIVEL COMPLETADO!";
+    ovText.innerText = level.desc + `\n\nGolpes: ${strokes}`;
+    ovBtn.innerText = currentLevel < LEVELS.length - 1 ? "Continuar Misión" : "Ver Reporte Final";
+    overlay.style.display = "flex";
+}
+
+ovBtn.onclick = () => {
+    if (currentLevel < LEVELS.length - 1) {
+        currentLevel++;
+        initLevel(currentLevel);
+    } else {
+        ovTitle.innerText = "¡MISIÓN CUMPLIDA!";
+        ovText.innerText = `Has llegado a Marte con un total de ${totalStrokes} golpes.\n¡La humanidad te lo agradece!`;
+        ovBtn.innerText = "Reiniciar Misión";
+        ovBtn.onclick = () => location.reload();
+    }
+};
+
+function draw() {
+    const level = LEVELS[currentLevel];
+    const theme = THEMES[level.theme];
+    
+    ctx.save();
+    if (ball.shake > 0) ctx.translate((Math.random()-0.5)*ball.shake, (Math.random()-0.5)*ball.shake);
+
+    ctx.fillStyle = theme.bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.fillStyle = theme.floor;
+    ctx.fillRect(10, 10, canvas.width-20, canvas.height-20);
+    
+    ctx.strokeStyle = theme.grid;
+    ctx.lineWidth = 1;
+    for(let i=0; i<canvas.width; i+=50) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i, canvas.height); ctx.stroke(); }
+    for(let i=0; i<canvas.height; i+=50) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(canvas.width, i); ctx.stroke(); }
+
+    level.sand.forEach(s => {
+        const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r);
+        grad.addColorStop(0, theme.sand); grad.addColorStop(1, theme.floor);
+        ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+    });
+
+    level.water.forEach(w => {
+        ctx.fillStyle = theme.water; ctx.fillRect(w.x, w.y, w.w, w.h);
+        ctx.fillStyle = "rgba(255,255,255,0.15)";
+        let offset = (frame * 1.5) % 60;
+        for(let j=w.y; j<w.y+w.h; j+=25) { ctx.fillRect(w.x + ((offset + j)%w.w), j, 15, 2); }
+    });
+
+    level.bridges.forEach(b => {
+        ctx.fillStyle = "#5d4037"; ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.strokeStyle = "#3e2723"; for(let i=0; i<b.w; i+=10) { ctx.strokeRect(b.x + i, b.y, 10, b.h); }
+    });
+
+    level.decor.forEach(d => drawDecoration(d));
+
+    ctx.fillStyle = theme.wall;
+    level.walls.forEach(w => {
+        ctx.shadowBlur = 10; ctx.shadowColor = "rgba(0,0,0,0.5)";
+        ctx.fillRect(w.x, w.y, w.w, w.h);
+        ctx.shadowBlur = 0;
+    });
+    
+    level.movingWalls.forEach(mw => {
+        let currentPos = Math.sin(frame * mw.speed) * mw.range/2;
+        let wx = mw.axis === 'x' ? mw.x + currentPos : mw.x;
+        let wy = mw.axis === 'y' ? mw.y + currentPos : mw.y;
+        ctx.fillStyle = "#ff5722"; ctx.fillRect(wx, wy, mw.w, mw.h);
+    });
+
+    level.spinners.forEach(s => {
+        ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(frame * s.speed);
+        ctx.fillStyle = "#90a4ae";
+        for(let i=0; i<4; i++) { ctx.rotate(Math.PI/2); ctx.fillRect(0, -4, s.size, 8); }
+        ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill();
+        ctx.restore();
+    });
+
+    // Hoyo
+    if (!level.isMarsLevel) {
+        ctx.fillStyle = "#000"; ctx.beginPath(); ctx.arc(hole.x, hole.y, hole.r, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = "rgba(0, 229, 255, 0.5)"; ctx.lineWidth = 2; ctx.stroke();
+    }
+
+    ambientParticles.forEach(p => {
+        ctx.fillStyle = theme.ambient; ctx.globalAlpha = p.life * 0.3;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    particles.forEach(p => {
+        ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    if (aiming && ball.vx === 0 && ball.vy === 0) {
+        const dx = ball.x - mouse.x; const dy = ball.y - mouse.y;
+        const dist = Math.hypot(dx, dy); const max = 200;
+        const len = Math.min(dist, max); const angle = Math.atan2(dy, dx);
+        ctx.setLineDash([8, 4]); ctx.strokeStyle = "rgba(255,255,255,0.4)";
+        ctx.beginPath(); ctx.moveTo(ball.x, ball.y);
+        ctx.lineTo(ball.x + Math.cos(angle)*len, ball.y + Math.sin(angle)*len); ctx.stroke();
+        ctx.setLineDash([]);
+        const pwr = len / max;
+        ctx.strokeStyle = `rgb(${pwr*255}, ${255-pwr*255}, 0)`; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.arc(ball.x, ball.y, 22, -Math.PI/2, (pwr*Math.PI*2)-Math.PI/2); ctx.stroke();
+    }
+
+    const bGrad = ctx.createRadialGradient(ball.x-2, ball.y-2, 2, ball.x, ball.y, ball.r);
+    bGrad.addColorStop(0, "#fff"); bGrad.addColorStop(1, "#bbb");
+    ctx.fillStyle = bGrad; ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI*2); ctx.fill();
+
+    ctx.restore();
+    update();
+    requestAnimationFrame(draw);
+}
+
+canvas.addEventListener("mousedown", e => {
+    if (ball.vx === 0 && ball.vy === 0 && gameState === "playing") { aiming = true; updateMouse(e); }
+});
+window.addEventListener("mousemove", updateMouse);
+window.addEventListener("mouseup", () => {
+    if (aiming) {
+        aiming = false;
+        const dx = ball.x - mouse.x; const dy = ball.y - mouse.y;
+        const dist = Math.hypot(dx, dy);
+        const power = Math.min(dist, 200) * 0.17;
+        const angle = Math.atan2(dy, dx);
+        if (power > 0.8) {
+            ball.lastX = ball.x; ball.lastY = ball.y;
+            ball.vx = Math.cos(angle) * power; ball.vy = Math.sin(angle) * power;
+            strokes++;
+            uiStats.innerText = `Golpes: ${strokes} | Par: ${LEVELS[currentLevel].par}`;
+            createParticles(ball.x, ball.y, "#fff", 8, 2);
+        }
+    }
+});
+
+function updateMouse(e) {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = e.clientX - rect.left;
+    mouse.y = e.clientY - rect.top;
+}
+
+initLevel(0);
+draw();
+</script>
+</body>
+</html>
